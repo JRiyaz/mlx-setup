@@ -29,6 +29,7 @@ WebUI](#connect-a-chat-ui-with-open-webui)
 application](#use-mlx-from-a-python-application)
 1. [Connect VS Code with Continue](#connect-vs-code-with-continue)
 1. [Useful commands](#useful-commands)
+1. [Benchmark model performance](#benchmark-model-performance)
 1. [Troubleshooting](#troubleshooting)
 1. [Security and practical notes](#security-and-practical-notes)
 1. [Official documentation](#official-documentation)
@@ -314,10 +315,11 @@ uv run python -m mlx_lm.chat --help
 Generate one response:
 
 ```bash
-uv run python -m mlx_lm.generate \
+uv run mlx_lm.generate \
   --model ./models/qwen3-8b-4bit \
   --prompt "Explain Python decorators with a short example." \
-  --max-tokens 300
+  --max-tokens 300 \
+  --verbose True
 ```
 
 Use the model directory that actually exists on disk. The folder name is the one supplied to `--local-dir`.
@@ -779,6 +781,273 @@ Check memory pressure `memory_pressure`
 Stop a server `Ctrl+C` in its terminal
 
 ## Open the project in VS Code `code .`
+
+## Benchmark model performance
+
+MLX-LM includes a benchmark command. Use it to compare models under repeatable, controlled workloads.
+
+### Run a benchmark
+
+From the project root:
+
+```bash
+uv run mlx_lm.benchmark \
+  --model ./models/qwen3-8b-4bit \
+  --prompt-tokens 512 \
+  --generation-tokens 500 \
+  --num-trials 5
+```
+
+Benchmark another model with the same settings:
+
+```bash
+uv run mlx_lm.benchmark \
+  --model ./models/mistral-7b-4bit \
+  --prompt-tokens 512 \
+  --generation-tokens 500 \
+  --num-trials 5
+```
+
+Use identical settings when comparing models.
+
+### Benchmark options
+
+Check the options supported by your installed release:
+
+```bash
+uv run mlx_lm.benchmark --help
+```
+
+Common options include:
+
+| Option | Meaning |
+|---|---|
+| `--model` | Local model directory or Hugging Face model ID |
+| `--prompt-tokens` | Number of input prompt tokens |
+| `--generation-tokens` | Number of output tokens to generate |
+| `--num-trials` | Number of timing trials |
+| `--batch-size` | Number of samples processed together |
+| `--delay` | Delay between trials |
+| `--pipeline` | Use the pipeline execution mode |
+| `--prefill-step-size` | Prompt prefill chunk size |
+
+Example with explicit batch size and a delay between trials:
+
+```bash
+uv run mlx_lm.benchmark \
+  --model ./models/qwen3-8b-4bit \
+  --prompt-tokens 512 \
+  --generation-tokens 500 \
+  --batch-size 1 \
+  --num-trials 5 \
+  --delay 2
+```
+
+The benchmark command's exact output and available options depend on your installed MLX-LM version. Use `--help` as the
+source of truth.
+
+### Understand the performance metrics
+
+| Metric | Meaning | Better result |
+|---|---|---|
+| Prompt processing / prompt TPS | Speed at which input tokens are processed | Higher |
+| Generation TPS | Speed at which output tokens are generated | Higher |
+| Time to first token (TTFT) | Time until the first generated token is available | Lower |
+| End-to-end latency | Total time for the request to finish | Lower |
+| Peak memory | Highest memory used during inference | Lower, while maintaining performance |
+
+Prompt processing and generation are different phases. A model can process a prompt quickly but generate output more
+slowly, or vice versa.
+
+### Run a real request benchmark with Python
+
+The MLX-LM benchmark command uses a controlled workload. For application-like measurements, send requests to the running
+MLX server and measure the actual API response.
+
+Create `scripts/benchmark_api.py`:
+
+```python
+import statistics
+import time
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://127.0.0.1:8080/v1",
+    api_key="not-needed",
+    timeout=300,
+)
+
+MODEL = "mlx-local"
+PROMPT = "Explain Python decorators with a practical example."
+MAX_TOKENS = 300
+TRIALS = 5
+
+# Warm-up request: do not include this in the measured results.
+client.chat.completions.create(
+    model=MODEL,
+    messages=[{"role": "user", "content": PROMPT}],
+    temperature=0,
+    max_tokens=MAX_TOKENS,
+)
+
+durations = []
+token_counts = []
+
+for trial in range(1, TRIALS + 1):
+    start = time.perf_counter()
+
+    response = client.chat.completions.create(
+        model=MODEL,
+        messages=[{"role": "user", "content": PROMPT}],
+        temperature=0,
+        max_tokens=MAX_TOKENS,
+    )
+
+    elapsed = time.perf_counter() - start
+    durations.append(elapsed)
+
+    usage = response.usage
+    output_tokens = usage.completion_tokens if usage else None
+    token_counts.append(output_tokens)
+
+    print(
+        f"Trial {trial}: "
+        f"{elapsed:.2f}s, "
+        f"output tokens={output_tokens}"
+    )
+
+valid_tps = [
+    count / duration
+    for count, duration in zip(token_counts, durations)
+    if count is not None and count > 0
+]
+
+print("\nSummary")
+print(f"Median end-to-end latency: {statistics.median(durations):.2f}s")
+
+if valid_tps:
+    print(f"Median end-to-end throughput: {statistics.median(valid_tps):.2f} tokens/s")
+else:
+    print("The server did not return completion token usage.")
+```
+
+Run it while the MLX server is running:
+
+```bash
+uv run python scripts/benchmark_api.py
+```
+
+This measures end-to-end request throughput, including prompt processing, generation, and request overhead. It is
+**not** pure generation TPS.
+
+### Measure time to first token and generation speed with streaming
+
+For a closer look at interactive chat performance, use streaming. The first content chunk provides an approximate
+time-to-first-token measurement. The final throughput calculation is an approximate output-token rate based on
+server-reported usage when available.
+
+Create `scripts/benchmark_stream.py`:
+
+```python
+import time
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://127.0.0.1:8080/v1",
+    api_key="not-needed",
+    timeout=300,
+)
+
+response = client.chat.completions.create(
+    model="mlx-local",
+    messages=[
+        {
+            "role": "user",
+            "content": "Explain how Python generators work, with examples.",
+        }
+    ],
+    temperature=0,
+    max_tokens=300,
+    stream=True,
+    stream_options={"include_usage": True},
+)
+
+start = time.perf_counter()
+first_token_time = None
+text_chunks = []
+reported_completion_tokens = None
+
+for chunk in response:
+    now = time.perf_counter()
+
+    if chunk.choices:
+        delta = chunk.choices[0].delta.content
+        if delta:
+            if first_token_time is None:
+                first_token_time = now - start
+            text_chunks.append(delta)
+            print(delta, end="", flush=True)
+
+    if getattr(chunk, "usage", None):
+        reported_completion_tokens = chunk.usage.completion_tokens
+
+end_to_end = time.perf_counter() - start
+
+print("\n\nPerformance")
+print(f"Time to first content chunk: {first_token_time:.3f}s" if first_token_time is not None else "First-token timing unavailable")
+print(f"End-to-end time: {end_to_end:.3f}s")
+
+if reported_completion_tokens:
+    print(f"Server-reported output tokens: {reported_completion_tokens}")
+    print(f"End-to-end output throughput: {reported_completion_tokens / end_to_end:.2f} tokens/s")
+else:
+    print("Streaming usage was not returned; token throughput was not calculated.")
+```
+
+Run:
+
+```bash
+uv run python scripts/benchmark_stream.py
+```
+
+Notes:
+
+- The first content chunk is an approximation of TTFT; network, server, and client overhead are included.
+- Some server versions may not return usage for streamed responses, even when `stream_options` is supplied. If usage is missing, do not infer exact token counts from characters.
+- The non-streaming benchmark above is the simpler, more portable starting point.
+
+### Monitor memory during a benchmark
+
+In another Terminal window:
+
+```bash
+memory_pressure
+```
+
+You can also open **Activity Monitor → Memory** and observe Memory Pressure, Memory Used, Compressed Memory, and Swap
+Used.
+
+MLX uses Apple Silicon unified memory. CPU and GPU share the same physical memory pool, so do not add a separate “GPU
+memory” figure to system RAM.
+
+For more accurate peak-memory comparisons, run one model at a time, close other memory-heavy applications, and use the
+same prompt length, generation length, and number of trials.
+
+### Make a fair model comparison
+
+For each model:
+
+1. Use the same prompt-token count and generation-token count.
+1. Use the same batch size and number of trials.
+1. Run a warm-up before collecting application-level measurements.
+1. Run models one at a time.
+1. Record prompt processing speed, generation speed, latency, and memory.
+1. Compare medians across multiple runs rather than relying on one result.
+
+The built-in benchmark is useful for controlled comparisons. The API scripts measure the experience your Python
+application or chat UI will see. These results answer different questions, so keep them separate in your notes.
 
 ## Troubleshooting
 

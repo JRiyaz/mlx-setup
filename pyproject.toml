@@ -9,7 +9,8 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "huggingface-hub==2.4.0",
-    "mlx-lm==0.0.13",
+    "mlx-lm==0.32.2",
+    "openai==3.46.0",
 ]
 
 [project.scripts]
@@ -18,3 +19,8 @@ mlx-setup = "mlx_setup:main"
 [build-system]
 requires = ["uv_build>=0.13.1,<0.14.0"]
 build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "ruff==0.17.4",
+]

@@ -7,12 +7,16 @@ client = OpenAI(
     api_key="not-needed",
 )
 
+models = client.models.list()
+model = models.data[0].id
+
 prompt = "Explain Python decorators with practical examples."
 
 start = time.perf_counter()
 
 response = client.chat.completions.create(
-    model="mlx-local",
+    # model="/Users/riyaz/Work/mlx-setup/models/qwen3-8b-4bit",
+    model=model,
     messages=[{"role": "user", "content": prompt}],
     temperature=0,
     max_tokens=500,
@@ -20,13 +24,14 @@ response = client.chat.completions.create(
 
 elapsed = time.perf_counter() - start
 
-answer = response.choices[0].message.content
+# answer = response.choices[0].message.content
+# # answer = response.model_dump_json(indent=2)
 usage = response.usage
 
-print("\nResponse:")
-print(answer)
+# print("\nResponse:")
+# print(answer)
 
-print("\nPerformance:")
+print(f"\nPerformance with model: {model}")
 print(f"Total time: {elapsed:.2f} seconds")
 
 if usage:

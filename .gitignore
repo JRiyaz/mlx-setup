@@ -1,10 +1,26 @@
-# Python-generated files
+# Python
+.venv/
 __pycache__/
-*.py[oc]
+*.py[cod]
 build/
 dist/
 wheels/
 *.egg-info
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local model weights
+models/
+
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+
+# macOS
+.DS_Store
 
 # Virtual environments
 .venv
+

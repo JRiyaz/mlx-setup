@@ -1,0 +1,18 @@
+{
+  "files.exclude": {
+    "**/models": true,
+    "**/.venv": true,
+    "**/__pycache__": true
+  },
+  "search.exclude": {
+    "**/models/**": true,
+    "**/.venv/**": true,
+    "**/__pycache__/**": true
+  },
+  "files.watcherExclude": {
+    "**/models/**": true,
+    "**/.venv/**": true
+  },
+  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python"
+}
+

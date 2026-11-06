@@ -8,6 +8,7 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
+    "huggingface-hub==2.4.0",
     "mlx-lm==0.0.13",
 ]
 

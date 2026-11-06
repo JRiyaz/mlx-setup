@@ -272,11 +272,15 @@ name = "mlx-setup"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "huggingface-hub" },
     { name = "mlx-lm" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "mlx-lm", specifier = "==0.0.13" }]
+requires-dist = [
+    { name = "huggingface-hub", specifier = "==2.4.0" },
+    { name = "mlx-lm", specifier = "==0.0.13" },
+]
 
 [[package]]
 name = "numpy"
